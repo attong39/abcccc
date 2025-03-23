@@ -1,0 +1,103 @@
+// File: Code.gs (clean & full v1)
+
+const SHEET_DON = 'DonDatXe';
+const SHEET_KHACH = 'KhachHang';
+const SHEET_MA = 'MaGioiThieu';
+const SHEET_BLOCK = 'Blacklist';
+const TELEGRAM_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN';
+const TELEGRAM_CHAT_ID = 'YOUR_CHAT_ID';
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu("Admin")
+    .addItem("Chặn khách hàng", "addToBlacklist")
+    .addItem("Bỏ chặn khách hàng", "removeFromBlacklist")
+    .addToUi();
+}
+
+function addToBlacklist() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_DON);
+  const blockSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_BLOCK);
+  const ui = SpreadsheetApp.getUi();
+  const row = sheet.getActiveRange().getRow();
+  const phone = sheet.getRange(row, 2).getValue();
+  if (!phone) return ui.alert("Không tìm thấy số điện thoại.");
+  const list = blockSheet.getDataRange().getValues().flat();
+  if (list.includes(phone)) return ui.alert("Đã có trong blacklist.");
+  blockSheet.appendRow([phone]);
+  ui.alert(`Đã chặn: ${phone}`);
+}
+
+function removeFromBlacklist() {
+  const blockSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_BLOCK);
+  const ui = SpreadsheetApp.getUi();
+  const row = blockSheet.getActiveRange().getRow();
+  const phone = blockSheet.getRange(row, 1).getValue();
+  if (!phone) return ui.alert("Không có số điện thoại.");
+  blockSheet.deleteRow(row);
+  ui.alert(`Đã bỏ chặn: ${phone}`);
+}
+
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('login_with_captcha');
+}
+
+function submitBooking(data) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetDon = ss.getSheetByName(SHEET_DON);
+  const sheetKhach = ss.getSheetByName(SHEET_KHACH);
+  const sheetMa = ss.getSheetByName(SHEET_MA);
+  const sheetBlock = ss.getSheetByName(SHEET_BLOCK);
+  const now = new Date();
+  const phone = data.phone;
+
+  if (sheetBlock.getDataRange().getValues().flat().includes(phone)) return;
+
+  sheetDon.appendRow([
+    data.name, data.phone, data.pickup, data.dropoff,
+    data.seats, data.time, data.ref, now
+  ]);
+
+  const khachData = sheetKhach.getDataRange().getValues();
+  let found = false;
+  for (let i = 1; i < khachData.length; i++) {
+    if (khachData[i][0] === phone) {
+      const row = i + 1;
+      sheetKhach.getRange(row, 4).setValue((parseInt(khachData[i][3]) || 0) + 1);
+      sheetKhach.getRange(row, 5).setValue(now);
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    sheetKhach.appendRow([phone, data.name, data.ref || '', 1, now]);
+    if (data.ref) {
+      const maData = sheetMa.getDataRange().getValues();
+      for (let i = 1; i < maData.length; i++) {
+        if (maData[i][0] === data.ref) {
+          sheetMa.getRange(i + 1, 4).setValue((parseInt(maData[i][3]) || 0) + 1);
+          break;
+        }
+      }
+    }
+  }
+
+  const msg = `🚗 *[ĐƠN MỚI]*\n` +
+    `*Tên:* ${data.name}\n` +
+    `*Đón:* ${data.pickup}\n` +
+    `*Đến:* ${data.dropoff}\n` +
+    `*Chỗ:* ${data.seats}\n` +
+    `*Giờ:* ${data.time}`;
+
+  const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
+  const payload = {
+    chat_id: TELEGRAM_CHAT_ID,
+    text: msg,
+    parse_mode: 'Markdown'
+  };
+  UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload)
+  });
+}
